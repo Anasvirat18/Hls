@@ -45,7 +45,7 @@ app.get("/:id/:file?", (req, res) => {
   }
 
   if (shouldStart) {
-    const cmd = `./ffmpeg -loglevel error -y \
+    const cmd = `ffmpeg -loglevel error -y \
 -headers "Referer: https://tangotv.in\\r\\nUser-Agent: Mozilla/5.0\\r\\n" \
 -i "${inputUrl}" \
 -c copy \
