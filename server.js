@@ -1,15 +1,19 @@
 const express = require("express");
 const fs = require("fs");
 const path = require("path");
+const https = require("https");
 const { exec } = require("child_process");
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 
 // Channel list
 const channels = {
   "1": "https://mumt02.tangotv.in/MATHRUBHUMINEWS/index.m3u8"
 };
+
+// Watermark (GitHub raw or your image)
+const logoUrl = "https://raw.githubusercontent.com/Anasvirat18/Hls/refs/heads/main/tbl.png";
 
 app.get("/:id/:file?", (req, res) => {
   const id = req.params.id;
@@ -23,10 +27,20 @@ app.get("/:id/:file?", (req, res) => {
   const tmpDir = path.join(__dirname, id);
   const m3u8File = path.join(tmpDir, "stream.m3u8");
   const lockFile = path.join(tmpDir, "lock");
+  const logoFile = path.join(tmpDir, "logo.png");
 
   // Create folder
   if (!fs.existsSync(tmpDir)) {
     fs.mkdirSync(tmpDir, { recursive: true });
+  }
+
+  // Download logo once
+  if (!fs.existsSync(logoFile)) {
+    const file = fs.createWriteStream(logoFile);
+    https.get(logoUrl, (response) => {
+      response.pipe(file);
+      file.on("finish", () => file.close());
+    });
   }
 
   // Start FFmpeg if needed
@@ -45,23 +59,33 @@ app.get("/:id/:file?", (req, res) => {
   }
 
   if (shouldStart) {
+    console.log("Starting FFmpeg with watermark...");
+
     const cmd = `ffmpeg -loglevel error -y \
 -headers "Referer: https://tangotv.in\\r\\nUser-Agent: Mozilla/5.0\\r\\n" \
--i "${inputUrl}" \
--c copy \
--f hls -hls_time 2 -hls_list_size 4 \
+-i "${inputUrl}" -i "${logoFile}" \
+-filter_complex "[1]crop='min(iw,ih)':'min(iw,ih)',scale=60:60,format=rgba,colorchannelmixer=aa=0.5[wm];[0][wm]overlay=x=main_w-overlay_w-15:y=main_h-overlay_h-15" \
+-c:v libx264 -preset ultrafast -tune zerolatency -crf 30 \
+-c:a aac -b:a 96k \
+-f hls \
+-hls_time 2 \
+-hls_list_size 4 \
 -hls_flags delete_segments+append_list+omit_endlist \
 -hls_segment_filename "${tmpDir}/seg_%03d.ts" \
-"${m3u8File}" > "${tmpDir}/log.txt" 2>&1 &`;
+"${m3u8File}"`;
 
-    exec(cmd);
+    exec(cmd, (error, stdout, stderr) => {
+      if (error) console.error("FFmpeg error:", error.message);
+      if (stderr) console.log(stderr);
+    });
+
     fs.writeFileSync(lockFile, String(Date.now()));
   }
 
   // Enable CORS
   res.setHeader("Access-Control-Allow-Origin", "*");
 
-  // Serve requested file
+  // Serve files
   if (requestFile) {
     const filePath = path.join(tmpDir, requestFile);
 
